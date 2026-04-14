@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   plan:
+    if: vars.ENABLE_TERRAFORM_CI == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:

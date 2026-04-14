@@ -14,6 +14,7 @@ permissions:
 
 jobs:
   apply:
+    if: vars.ENABLE_TERRAFORM_CI == 'true'
     runs-on: ubuntu-latest
     environment: production
     strategy:
