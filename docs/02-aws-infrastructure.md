@@ -10,23 +10,23 @@ Terraform で AWS 上に本番を意識したネットワーク基盤を構築�
 
 ### ネットワーク系
 
-| 用語 | 意味 | たとえると |
-|------|------|-----------|
-| **VPC** | Virtual Private Cloud。AWS 上に作る自分専用のネットワーク空間 | 自分の土地 (敷地全体) |
-| **サブネット** | VPC の中をさらに区切ったネットワーク | 敷地内の「建物」や「区画」 |
-| **Public Subnet** | インターネットと直接通信できるサブネット | 道路に面した店舗 |
-| **Private Subnet** | インターネットから直接アクセスできないサブネット | 敷地の奥にある倉庫 |
-| **AZ (Availability Zone)** | AWS データセンターの物理的な場所。障害に備えて複数の AZ に分散配置する | 東京の別々のビル |
-| **CIDR** | IP アドレスの範囲を表す記法。`10.0.0.0/16` は「10.0.x.x の 65,536 個の IP」を意味する | 住所の「○丁目」の範囲指定 |
+| 用語 | 意味 |
+|------|------|
+| **VPC** | Virtual Private Cloud。AWS 上に作る自分専用のネットワーク空間 |
+| **サブネット** | VPC の中をさらに区切ったネットワーク |
+| **Public Subnet** | インターネットと直接通信できるサブネット |
+| **Private Subnet** | インターネットから直接アクセスできないサブネット |
+| **AZ (Availability Zone)** | AWS データセンターの物理的な場所。障害に備えて複数の AZ に分散配置する |
+| **CIDR** | IP アドレスの範囲を表す記法。`10.0.0.0/16` は「10.0.x.x の 65,536 個の IP」を意味する |
 
 ### ゲートウェイ・ルーティング系
 
-| 用語 | 意味 | たとえると |
-|------|------|-----------|
-| **Internet Gateway (IGW)** | VPC とインターネットをつなぐ出入口。**双方向通信** (外→内、内→外) ができる | 敷地の正面玄関 (誰でも出入りできる) |
-| **NAT Gateway** | Private Subnet からインターネットへ出るための中継地点。**内→外の片方向だけ**。外からはアクセスできない | 代理人が外出して買い物してくる (外から家の場所はわからない) |
-| **EIP (Elastic IP)** | 固定のパブリック IP アドレス。NAT Gateway に割り当てて使う | 固定電話の番号 |
-| **Route Table** | 「この宛先のトラフィックはここに送れ」というルーティングルール | 道案内の看板 |
+| 用語 | 意味 |
+|------|------|
+| **Internet Gateway (IGW)** | VPC とインターネットをつなぐ出入口。**双方向通信** (外→内、内→外) ができる |
+| **NAT Gateway** | Private Subnet からインターネットへ出るための中継地点。**内→外の片方向だけ**。外からはアクセスできない |
+| **EIP (Elastic IP)** | 固定のパブリック IP アドレス。NAT Gateway に割り当てて使う |
+| **Route Table** | 「この宛先のトラフィックはここに送れ」というルーティングルール |
 
 #### Internet Gateway と NAT Gateway の違い
 
@@ -53,12 +53,12 @@ flowchart LR
 
 ### セキュリティ系
 
-| 用語 | 意味 | たとえると |
-|------|------|-----------|
-| **Security Group (SG)** | リソースへの通信を許可/拒否するファイアウォール | 建物の入退室管理 |
-| **Ingress** | 外から中への通信 (受信ルール) | 入館ルール |
-| **Egress** | 中から外への通信 (送信ルール) | 退館ルール |
-| **ポート 443** | HTTPS 通信で使うポート番号 | 建物の「HTTPS 専用の入口」 |
+| 用語 | 意味 |
+|------|------|
+| **Security Group (SG)** | リソースへの通信を許可/拒否するファイアウォール |
+| **Ingress** | 外から中への通信 (受信ルール) |
+| **Egress** | 中から外への通信 (送信ルール) |
+| **ポート 443** | HTTPS 通信で使うポート番号 |
 
 ### AWS サービス系
 
@@ -228,6 +228,40 @@ resource "aws_subnet" "private_db" {
 }
 ```
 
+**コードの読み方:**
+
+まず VPC 本体:
+
+| 行 | 意味 |
+|---|---|
+| `resource "aws_vpc" "main"` | VPC を作る。このコード内では `"main"` という名前で参照する |
+| `cidr_block = var.vpc_cidr` | VPC の IP アドレス範囲。変数から受け取る (例: `"10.0.0.0/16"`) |
+| `enable_dns_support = true` | VPC 内でドメイン名 → IP アドレスの変換ができるようにする |
+| `tags = { Name = "..." }` | AWS コンソールで表示される名前タグ |
+
+次にサブネット (ここが一番複雑):
+
+| 行 | 意味 |
+|---|---|
+| `count = length(var.public_subnets)` | `count` はリソースを複数個作る仕組み。`var.public_subnets` が 2 個のリストなら、サブネットも 2 個作る |
+| `vpc_id = aws_vpc.main.id` | 「上で作った VPC の中に作る」という紐づけ |
+| `var.public_subnets[count.index]` | `count.index` は繰り返しの番号 (0, 1, 2...)。リストの 0 番目、1 番目... を順に取り出す |
+| `availability_zone = var.azs[count.index]` | サブネットごとに別の AZ に配置する |
+| `map_public_ip_on_launch = true` | このサブネットに作ったリソースに自動でパブリック IP を付ける (Public Subnet だけの設定) |
+
+`count` の動きを具体的に見ると:
+
+```
+var.public_subnets = ["10.0.1.0/24", "10.0.2.0/24"]
+var.azs            = ["ap-northeast-1a", "ap-northeast-1c"]
+
+→ count = 2 なので 2 回繰り返す:
+  count.index=0: cidr_block="10.0.1.0/24", az="ap-northeast-1a"
+  count.index=1: cidr_block="10.0.2.0/24", az="ap-northeast-1c"
+```
+
+Private Subnet (App, DB) も同じパターン。`map_public_ip_on_launch` がないのが Public との違い。
+
 ### 2. Internet Gateway + NAT Gateway
 
 - **Internet Gateway**: VPC とインターネットをつなぐ (Public Subnet 用)
@@ -268,6 +302,20 @@ resource "aws_nat_gateway" "main" {
   depends_on = [aws_internet_gateway.main]  # IGW が先にできていないと動かない
 }
 ```
+
+**コードの読み方:**
+
+| 行 | 意味 |
+|---|---|
+| `resource "aws_internet_gateway" "main"` | Internet Gateway を作る。VPC をインターネットに接続するために必要 |
+| `vpc_id = aws_vpc.main.id` | どの VPC に取り付けるか |
+| `resource "aws_eip" "nat"` | Elastic IP (固定 IP アドレス) を作る |
+| `count = length(var.azs)` | AZ の数だけ作る (AZ ごとに NAT Gateway を置くため) |
+| `domain = "vpc"` | この IP は VPC 内で使うことを宣言 |
+| `resource "aws_nat_gateway" "main"` | NAT Gateway を作る |
+| `allocation_id = aws_eip.nat[count.index].id` | 上で作った EIP を NAT Gateway に割り当てる。`[count.index]` で「同じ番号のもの」を紐づける |
+| `subnet_id = aws_subnet.public[count.index].id` | NAT Gateway は Public Subnet に配置する (Private Subnet の代わりに外と通信するため) |
+| `depends_on = [aws_internet_gateway.main]` | 「IGW が先に作られてからこのリソースを作れ」という順序指定。通常 Terraform は参照関係から自動で順序を決めるが、明示的に指定が必要な場合に使う |
 
 ### 3. Route Table
 
@@ -312,6 +360,22 @@ resource "aws_route_table" "private" {
   }
 }
 ```
+
+**コードの読み方:**
+
+| 行 | 意味 |
+|---|---|
+| `resource "aws_route_table" "public"` | ルートテーブル (通信の経路案内表) を作る |
+| `route { }` | ルートテーブル内にルール (経路) を定義するブロック |
+| `cidr_block = "0.0.0.0/0"` | 宛先の指定。`0.0.0.0/0` は「すべての宛先」を意味する特別な CIDR |
+| `gateway_id = aws_internet_gateway.main.id` | その通信を Internet Gateway に送る |
+| `resource "aws_route_table_association" "public"` | ルートテーブルとサブネットの紐づけ。ルートテーブルを作っただけでは機能せず、「どのサブネットで使うか」を指定する必要がある |
+| `route_table_id = aws_route_table.public.id` | 上で作った Public 用のルートテーブルを指定 |
+| `nat_gateway_id = aws_nat_gateway.main[count.index].id` | Private 用は NAT Gateway 経由にする (Internet Gateway ではなく) |
+
+Public と Private の違い:
+- **Public**: 外への通信 → Internet Gateway に直接送る (`gateway_id`)
+- **Private**: 外への通信 → NAT Gateway 経由で送る (`nat_gateway_id`)
 
 ### 4. Security Group
 
@@ -379,6 +443,31 @@ resource "aws_security_group" "app" {
   }
 }
 ```
+
+**コードの読み方:**
+
+ALB 用の Security Group:
+
+| 行 | 意味 |
+|---|---|
+| `resource "aws_security_group" "alb"` | Security Group (ファイアウォール) を作る |
+| `name_prefix = "${var.name_prefix}-alb-"` | AWS 上でのリソース名の先頭部分。Terraform がこの後にランダム文字列を付ける |
+| `ingress { }` | 受信ルール (外 → 中への通信の許可設定) |
+| `from_port = 443` / `to_port = 443` | ポート 443 (HTTPS) だけを許可。両方同じ値 = 1つのポートのみ |
+| `protocol = "tcp"` | TCP プロトコルを許可 |
+| `cidr_blocks = ["0.0.0.0/0"]` | すべての IP アドレスからのアクセスを許可 |
+| `egress { }` | 送信ルール (中 → 外への通信の許可設定) |
+| `protocol = "-1"` | `-1` は「すべてのプロトコル」を意味する特別な値 |
+| `lifecycle { create_before_destroy = true }` | 更新時に「新しい SG を作る → 古い SG を消す」の順で処理する。逆だと一瞬通信が切れるため |
+
+App 用の Security Group:
+
+| 行 | 意味 |
+|---|---|
+| `from_port = 8080` / `to_port = 8080` | ポート 8080 のみ許可 (アプリが待ち受けるポート) |
+| `security_groups = [aws_security_group.alb.id]` | `cidr_blocks` (IP アドレス範囲) ではなく、**別の Security Group を指定**している。「ALB の SG が付いたリソースからのみ許可」という意味 |
+
+ポイント: ALB は `cidr_blocks = ["0.0.0.0/0"]` で世界中から受け付けるが、App は `security_groups` で ALB からの通信しか受け付けない。これにより「ユーザー → ALB → App」の流れが強制される。
 
 ## Remote State の設定
 
@@ -522,6 +611,20 @@ terraform init
 terraform apply
 ```
 
+**コードの読み方:**
+
+| 行 | 意味 |
+|---|---|
+| `bucket = "platform-infra-tfstate-${data.aws_caller_identity.current.account_id}"` | バケット名に AWS アカウント ID を含める。S3 バケット名は世界中で一意である必要があるため |
+| `lifecycle { prevent_destroy = true }` | `terraform destroy` してもこのリソースだけは消さない安全装置。state を誤って消すと全環境の管理が壊れるため |
+| `resource "aws_s3_bucket_versioning"` | S3 のバージョニング (変更履歴) を有効にする。state ファイルが壊れても前のバージョンに戻せる |
+| `resource "aws_s3_bucket_server_side_encryption_configuration"` | S3 に保存するファイルを暗号化する設定。state にはパスワード等が含まれることがあるため |
+| `sse_algorithm = "AES256"` | 暗号化の方式。AWS が標準で提供するもの |
+| `resource "aws_dynamodb_table" "tflock"` | ロック用のテーブル。2 人が同時に `terraform apply` するのを防ぐ |
+| `billing_mode = "PAY_PER_REQUEST"` | 使った分だけ課金。ロックは頻繁に使わないのでほぼ無料 |
+| `hash_key = "LockID"` | テーブルの主キーの名前。Terraform が自動でこのキーを使ってロックする |
+| `type = "S"` | DynamoDB の型指定。`"S"` = String (文字列) |
+
 ### 手順 2: envs/dev/ で S3 を state の保存先に指定する
 
 ```hcl
@@ -537,6 +640,16 @@ terraform {
   }
 }
 ```
+
+**コードの読み方:**
+
+| 行 | 意味 |
+|---|---|
+| `terraform { backend "s3" { } }` | state の保存先を S3 にする設定。`backend` は state をどこに置くかの宣言 |
+| `bucket = "platform-infra-tfstate-123456789"` | 手順 1 で作った S3 バケット名 |
+| `key = "dev/terraform.tfstate"` | S3 バケット内のファイルパス。環境ごとに変える (`dev/`, `prod/` など) |
+| `dynamodb_table = "terraform-lock"` | 手順 1 で作ったロック用テーブル |
+| `encrypt = true` | state を暗号化して保存する |
 
 これで `envs/dev/` で `terraform apply` すると、state が自分の PC ではなく S3 に保存されるようになる。
 
